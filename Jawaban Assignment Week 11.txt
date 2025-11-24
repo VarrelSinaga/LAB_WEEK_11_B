@@ -1,0 +1,62 @@
+1. When a user takes a picture, that picture is stored in a path based on the given URI. In which part of the code handles this? (Copy that part of the code as the answer)
+	Di file ProvideFileManager.kt:
+	fun generatePhotoUri(time: Long): FileInfo {
+        	val name = "img_$time.jpg"
+        	// Get the file object
+        	// The file will be stored in the folder defined in file_provider_paths.xml
+        	val file = File(
+            		context.getExternalFilesDir(fileHelper.getPicturesFolder()),
+            		name
+        	)
+        	return FileInfo(
+            		fileHelper.getUriFromFile(file),
+            		file,
+            		name,
+            		fileHelper.getPicturesFolder(),
+            		"image/jpeg"
+        	)
+    	}
+
+2.  In your FileInfo.kt, there are 5 attributes. On the first attribute, what does the URI refer to? And on the fourth attribute, what does relativePath refer to?
+	Atribut pertama uri merujuk pada Content URI dari file tersebut.
+	Atribut relativePath merujuk pada jalur direktori tempat file disimpan, relatif terhadap direktori publik utama.
+3. Explain the chronological order from when a user takes a picture until the file is stored in the MediaStore.
+	Tahap 1: Persiapan Sebelum Kamera Dibuka (Terjadi di MainActivity)
+		1.Pengguna Menekan Tombol: Pengguna menekan tombol "Take a Picture". Ini memicu pemanggilan fungsi openImageCapture().
+		2.Membuat Lokasi Penyimpanan Sementara: Di dalam openImageCapture(), MainActivity memanggil providerFileManager.generatePhotoUri().
+			•Tujuan: Untuk membuat lokasi penyimpanan sementara yang aman di dalam direktori privat aplikasi. File ini belum ada, hanya mendefinisikan di mana kamera harus menyimpannya.
+			•Proses di ProviderFileManager:
+				•Sebuah nama file unik dibuat (misalnya, img_1678886400000.jpg).
+				•Sebuah objek File dibuat yang menunjuk ke path privat aplikasi (contoh: /storage/emulated/0/Android/data/com.example.lab_week_11_b/files/Pictures/img_1678886400000.jpg).
+				•FileProvider mengubah path File ini menjadi sebuah Content URI yang aman (contoh: content://com.example.lab_week_11_b.provider/my_images/img_123.jpg).
+				•Semua informasi ini (URI, objek File, nama, dll.) dibungkus dalam objek FileInfo dan dikembalikan ke MainActivity.
+		3.Menyimpan Informasi & Meluncurkan Kamera:
+			•MainActivity menyimpan objek FileInfo ini ke dalam variabel photoInfo agar bisa diakses nanti.
+			•MainActivity memanggil takePictureLauncher.launch(uri). URI yang diberikan adalah Content URI dari langkah sebelumnya.
+			•Android membuka aplikasi kamera, memberikannya URI tersebut dan izin sementara untuk menulis data ke sana.
+	Tahap 2: Pengambilan dan Penyimpanan Awal oleh Kamera
+		4.Pengguna Mengambil Gambar: Pengguna mengambil foto menggunakan aplikasi kamera.
+		5.Kamera Menyimpan File: Aplikasi kamera menggunakan Content URI yang diberikan untuk menyimpan data gambar (file .jpg) ke lokasi sementara yang telah ditentukan di direktori privat aplikasi. Setelah langkah ini, file fisik sekarang ada di perangkat.
+	Tahap 3: Memindahkan File ke Galeri Publik (MediaStore)
+		6.Kamera Ditutup & Callback Dipicu: Setelah gambar disimpan, aplikasi kamera ditutup dan kontrol kembali ke MainActivity. Ini secara otomatis memicu callback dari registerForActivityResult yang telah disiapkan.
+		7.Memulai Proses Penyimpanan ke MediaStore (di Background Thread):
+			•Callback di MainActivity memanggil providerFileManager.insertImageToStore(photoInfo).
+			•ProviderFileManager menggunakan executor (yang Anda buat sebagai pool-*-thread-*) untuk menjalankan tugas ini di background thread agar tidak memblokir UI.
+		8.Menyiapkan ContentValues (Terjadi di MediaContentHelper):
+			•Di dalam insertImageToStore, providerFileManager memanggil mediaContentHelper.generateImageContentValues(photoInfo).
+			•Fungsi ini membuat objek ContentValues, yang pada dasarnya adalah sebuah peta (map) yang berisi metadata untuk file baru di MediaStore.
+			•Menggunakan data dari photoInfo, ia mengisi ContentValues dengan:
+				•DISPLAY_NAME: Nama file, misalnya img_1678886400000.jpg.
+				•RELATIVE_PATH: Folder tempat file akan muncul di galeri publik, misalnya Pictures/MyAppAlbum/.
+				•MIME_TYPE: Jenis file, yaitu image/jpeg.
+		9.Membuat Entri Baru di MediaStore:
+			•providerFileManager menggunakan ContentResolver untuk memanggil resolver.insert(uri, contentValues).
+			•uri: MediaStore.Images.Media.EXTERNAL_CONTENT_URI, yang memberitahu sistem untuk membuat entri baru di koleksi gambar publik.
+			•contentValues: Metadata dari langkah sebelumnya.
+			•Panggilan ini membuat entri "kosong" di database MediaStore dan mengembalikan URI baru yang menunjuk ke entri tersebut.
+		10.Menyalin Data File Fisik:
+			•Sekarang, providerFileManager memiliki dua hal penting:
+				1.File asli yang disimpan oleh kamera di direktori privat (photoInfo.file).
+				2.URI dari entri MediaStore baru yang masih kosong.
+			•providerFileManager membuka InputStream dari file asli dan OutputStream ke URI MediaStore.
+			•Menggunakan IOUtils.copy() dari library commons-io, konten dari file asli disalin byte-demi-byte ke lokasi MediaStore.
